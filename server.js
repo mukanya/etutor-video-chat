@@ -1,4 +1,4 @@
-require("dotenv").config();
+require('dotenv').config();
 const express = require("express");
 const http = require("http");
 const app = express();
@@ -7,33 +7,45 @@ const socket = require("socket.io");
 const io = socket(server);
 const path = require("path");
 
-const rooms = {};
+const users = {};
 
-io.on("connection", socket => {
+const socketToRoom = {};
+
+io.on('connection', socket => {
     socket.on("join room", roomID => {
-        if (rooms[roomID]) {
-            rooms[roomID].push(socket.id);
+        if (users[roomID]) {
+            const length = users[roomID].length;
+            if (length === 4) {
+                socket.emit("room full");
+                return;
+            }
+            users[roomID].push(socket.id);
         } else {
-            rooms[roomID] = [socket.id];
+            users[roomID] = [socket.id];
         }
-        const otherUser = rooms[roomID].find(id => id !== socket.id);
-        if (otherUser) {
-            socket.emit("other user", otherUser);
-            socket.to(otherUser).emit("user joined", socket.id);
+        socketToRoom[socket.id] = roomID;
+        const usersInThisRoom = users[roomID].filter(id => id !== socket.id);
+
+        socket.emit("all users", usersInThisRoom);
+    });
+
+    socket.on("sending signal", payload => {
+        io.to(payload.userToSignal).emit('user joined', { signal: payload.signal, callerID: payload.callerID });
+    });
+
+    socket.on("returning signal", payload => {
+        io.to(payload.callerID).emit('receiving returned signal', { signal: payload.signal, id: socket.id });
+    });
+
+    socket.on('disconnect', () => {
+        const roomID = socketToRoom[socket.id];
+        let room = users[roomID];
+        if (room) {
+            room = room.filter(id => id !== socket.id);
+            users[roomID] = room;
         }
     });
 
-    socket.on("offer", payload => {
-        io.to(payload.target).emit("offer", payload);
-    });
-
-    socket.on("answer", payload => {
-        io.to(payload.target).emit("answer", payload);
-    });
-
-    socket.on("ice-candidate", incoming => {
-        io.to(incoming.target).emit("ice-candidate", incoming.candidate);
-    });
 });
 
 if (process.env.PROD) {
@@ -43,5 +55,6 @@ if (process.env.PROD) {
     });
 }
 
-const port = process.env.PORT || 8000;
-server.listen(port, () => console.log(`server is running on port ${port}`));
+server.listen(process.env.PORT || 8000, () => console.log(`server is running on port ${port}`));
+
+//run again
